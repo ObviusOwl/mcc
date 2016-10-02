@@ -1,0 +1,3 @@
+*.o
+wrapper/mc
+wrapper/client
