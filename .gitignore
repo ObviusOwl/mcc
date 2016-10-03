@@ -1,3 +1,5 @@
 *.o
 wrapper/mc
 wrapper/client
+frontend/bower_components
+frontend/node_modules

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="UTF-8">
+		<title>mcc</title>
+		
+		<!-- build:js js/lib.js -->
+		<script src="/bower_components/jquery/dist/jquery.js"></script>
+		<script src="/bower_components/bootstrap/dist/js/bootstrap.min.js"></script>
+		<script src="/socket.io/socket.io.js"></script>
+		<!-- endbuild -->
+
+		<!-- build:js js/site.js -->
+		<script src="client.js"></script>
+		<!-- endbuild -->
+
+		<!-- build:css css/site.css -->
+		<link rel="stylesheet" href="/bower_components/bootstrap/dist/css/bootstrap.min.css"/>
+		<link rel="stylesheet" href="/bower_components/bootstrap/dist/css/bootstrap-theme.min.css"/>
+		<link rel="stylesheet" href="client.css"/>
+		<!-- endbuild -->
+
+	</head>
+	
+	<body>
+		<div id="maincontainer">
+			<div id="prompt" contenteditable="true"></div>
+			<div id="consolecont">
+				<pre id="console"></pre>
+			</div>
+		</div>
+	</body>
+</html>

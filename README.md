@@ -60,3 +60,36 @@ make wrapper
 make client
 ```
 
+
+## Web frontend
+
+The web frontend is a client for the wrapper using web technologies. 
+
+A *node.js* server translates between the socket and the web page using *socket.io*.
+
+This is fairly basic at the moment, but can grow very useful.
+
+Install the dependencies and start the server:
+
+```
+npm install
+bower install
+node server.js
+```
+
+Then open in a browser localhost at port 3000: http://localhost:3000
+
+The streams are automatically reconnected on error. 
+
+Currently the web page keeps only the 50 last lines of the log, because otherwise 
+the browser may become unresponsive if the page keeps growing.
+
+Planned features:
+
+- highlight the log using highlightjs
+- list connected players using the query port and list command as fallback
+- construct minecraft server commands graphically (by using the user list)
+- responsive design
+- login
+
+
