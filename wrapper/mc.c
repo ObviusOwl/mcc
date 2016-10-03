@@ -15,31 +15,105 @@
 
 #include <pthread.h>
 
-struct thread_arg_data{
-	int *pipe;
-	int *socket;
-};
+#define LISTEN_THREAD_COUNT 4
 
-void *send_thread_main( void *arg ){
-	struct thread_arg_data *arg_data;
-	arg_data = (struct thread_arg_data* ) arg;
+typedef struct _sender_thread{
+	int pipe;
+	int socket;
+	pthread_t *thread;
+	pthread_mutex_t lock;
+	int willclose;
+} SenderThread;
+
+void *thread_main( void *arg ){
+	SenderThread *self;
+	self = (SenderThread* ) arg;
 	char readbuffer[1024];
 	ssize_t count = 0;
 	ssize_t count2 = 0;
+	ssize_t prefix_len = 3*sizeof(char);
 	
 	while( 1 ){
-		count = recv( *(arg_data->socket), readbuffer, sizeof(readbuffer), 0 );
-		if( count == 0 ){
+		pthread_mutex_lock( &(self->lock) );
+		if( self->willclose == 1 ){
+			pthread_mutex_unlock( &(self->lock) );
 			break;
+		}
+		pthread_mutex_unlock( &(self->lock) );
+		
+		count = recv( self->socket, readbuffer, sizeof(readbuffer), 0 );
+		if( count == 0 ){
+			//break;
 		}else if( count < 0 ){
 			perror("failed to read from socket");
 		}else{
-			count2 = write( *(arg_data->pipe), readbuffer, count );
-			if( count2 < 0 ){
-				perror("failed to write to pipe");
+			if( count > prefix_len ){
+				// message to stdin of child process
+				if( strncmp( readbuffer, "msg", prefix_len) == 0 ){
+					count2 = write( self->pipe, &(readbuffer[3]), count );
+					if( count2 < 0 ){
+						perror("failed to write to pipe");
+					}
+				// client disconnect
+				}else if( strncmp( readbuffer, "bye", prefix_len) == 0 ){
+					pthread_mutex_lock( &(self->lock) );
+					self->willclose = 1;
+					pthread_mutex_unlock( &(self->lock) );
+				}else{
+					fprintf(stderr,"unknown command %.3s\n", readbuffer);
+				}
 			}
 		}
 	}
+	pthread_mutex_lock( &(self->lock) );
+	free( self->thread );
+	self->thread = NULL;
+	self->willclose = 0;
+	close(self->socket );
+	pthread_mutex_unlock( &(self->lock) );
+	pthread_exit(NULL);
+}
+void *send_thread_main( void *arg ){
+	SenderThread *threads;
+	threads = (SenderThread*) arg;
+	SenderThread* self = &threads[0];
+	char readbuffer[1024];
+	ssize_t count = 0;
+	int i = 0;
+	int ok= 0;
+	ssize_t prefix_len = 3*sizeof(char);
+
+	while( 1 ){
+		count = read(self->pipe, &(readbuffer[3]), sizeof(readbuffer)-prefix_len );
+		if( count > 0 ){
+			memcpy( readbuffer, "msg", prefix_len );
+			for( i=1; i<LISTEN_THREAD_COUNT+1; i++ ){
+				ok = 0;
+				pthread_mutex_lock( &(threads[i].lock) );
+				if( threads[i].thread != NULL ){
+					ok = 1;
+				}
+				pthread_mutex_unlock( &(threads[i].lock) );
+				if( ok == 1 ){
+					if( send( (&threads[i])->socket, readbuffer, count+prefix_len, MSG_NOSIGNAL ) < 0 ){
+						perror("faild to send data");
+						// shutdown client thread
+						pthread_mutex_lock( &(threads[i].lock) );
+						threads[i].willclose = 1;
+						pthread_mutex_unlock( &(threads[i].lock) );
+						continue;
+					}
+				}
+			}
+		}else{
+			break;
+		}
+	}
+	pthread_mutex_lock( &(self->lock) );
+	free( self->thread );
+	self->thread = NULL;
+	self->willclose = 0;
+	pthread_mutex_unlock( &(self->lock) );
 	pthread_exit(NULL);
 }
 
@@ -65,12 +139,12 @@ int main(int argc, char **argv){
 		// parent
 		close( pipe1[1] );
 		close( pipe2[0] );
-		pthread_t send_thread;
+		SenderThread threads[LISTEN_THREAD_COUNT + 1];
+
 		char readbuffer[1024];
+		int i;
 		int listen_sock, client_sock;
 		struct sockaddr_un sock_addr;
-		struct thread_arg_data thread_data;
-		
 		sock_addr.sun_family = AF_UNIX;
 		strcpy(sock_addr.sun_path, config.socket_file );
 
@@ -87,36 +161,58 @@ int main(int argc, char **argv){
 			perror("faild to bind to socket");
 			exit(EXIT_FAILURE);
 		}
-		r = listen(listen_sock, 5);
+		// do not accept more clients than we have threads (4)
+		r = listen(listen_sock, LISTEN_THREAD_COUNT);
 		if( r == -1 ){
 			perror("faild to listen on socket");
 			exit(EXIT_FAILURE);
 		}
-		thread_data.pipe = &(pipe2[1]);
+
+		// init threads, threads[0] is the only sender thread
+		for( i=0; i< LISTEN_THREAD_COUNT+1 ; i++ ){
+			threads[i].thread = NULL;
+			threads[i].willclose = 0;
+			pthread_mutex_init( &(threads[i].lock), NULL );
+		}
+		for( i=1; i< LISTEN_THREAD_COUNT+1 ; i++ ){
+			threads[i].pipe = pipe2[1];
+		}
+		threads[0].pipe = pipe1[0];
+		threads[0].thread = (pthread_t *) malloc( sizeof(pthread_t) );
+		pthread_create( threads[0].thread, NULL, send_thread_main, (void*) &threads);
 		
 		while(1){
+			// accept new connection
 			client_sock = accept( listen_sock, NULL, NULL );
-			thread_data.socket = &client_sock;
-			pthread_create( &send_thread, NULL, send_thread_main, (void*) &thread_data);
 			if( client_sock == -1 ){
 				perror("faild accepting connection");
-				break;
+				continue;
 			}
-			int count = 0;
-		    while( 1 ){
-				count = read(pipe1[0], readbuffer, sizeof(readbuffer) );
-				if( count > 0 ){
-					if( send( client_sock, readbuffer, count, MSG_NOSIGNAL ) < 0 ){
-						perror("faild to send data");
-						break;
-					}
-				}else{
+			// get a free thread 
+			SenderThread *curr_thread = NULL;
+			for( i=1; i<LISTEN_THREAD_COUNT+1; i++ ){
+				pthread_mutex_lock( &(threads[i].lock) );
+				if( (&threads[i])->thread == NULL ){
+					curr_thread = &(threads[i]);
 					break;
+				}else{
+					pthread_mutex_unlock( &(threads[i].lock) );
 				}
-    		}
-			pthread_join( send_thread, NULL);
-			thread_data.socket = NULL;
-    		close(client_sock);
+			}
+			if( curr_thread == NULL ){
+				continue;
+			}
+			curr_thread->socket = client_sock;
+			curr_thread->thread = (pthread_t *) malloc( sizeof(pthread_t) );
+			pthread_mutex_unlock( &(curr_thread->lock) );
+			
+			pthread_create( curr_thread->thread, NULL, thread_main, (void*) curr_thread);
+		}
+		for( i=0; i<LISTEN_THREAD_COUNT+1; i++ ){
+			if( threads[i].thread != NULL ){
+				pthread_join( *((&(threads[i]))->thread), NULL);
+			}
+			pthread_mutex_destroy( &(threads[i].lock) );
 		}
 		close(listen_sock);
 		unlink(sock_addr.sun_path);
