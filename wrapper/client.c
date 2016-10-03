@@ -16,22 +16,32 @@
 void *thread_main( void *arg ){
 	unsigned int *sock;
 	sock = (unsigned int *) arg;
+	char *line = (char *) malloc( 20*sizeof(char) );
+	size_t size = 20*sizeof(char);
+	int do_quit = 0;
 
 	while( 1 ){
-		char *line = NULL;
-		size_t size;
 		if( getline(&line, &size, stdin) == -1) {
 			perror("faild to read line from stdin");
 			break;
 		}
-		if( send( *sock, line, size*sizeof(char), MSG_NOSIGNAL ) < 0 ){
+		if( strncmp( line, ":", 1 ) == 0 ){
+			if( strlen(line)+5 > size ){
+				line = realloc( line, size+6 );
+			}
+			memmove( line+5, line, strlen(line)+1 );
+			memcpy( line, "::mc::", 5);
+			do_quit = 1;
+		}
+		if( send( *sock, line, size, MSG_NOSIGNAL ) < 0 ){
 			perror("faild to send data");
 			break;
 		}
-		if( strncmp( line, "bye", 3*sizeof(char) ) == 0 ){
+		if( do_quit == 1 ){
 			break;
 		}
 	}
+	free( line );
 	pthread_exit(NULL);
 }
 
@@ -60,14 +70,10 @@ int main(int argc, char **argv){
 	ssize_t count = 0;
 	while( 1 ) {
 		count = recv(sock, readbuffer, sizeof(readbuffer), 0);
-		if( count == 0 ){
+		if( count <= 0 ){
 			break;
 		}
-		if( strncmp( readbuffer, "msg", 3*sizeof(char) ) == 0 ){
-			write( STDOUT_FILENO, &(readbuffer[3]), count-3*sizeof(char) );
-		}else{
-			write( STDOUT_FILENO, readbuffer, count );
-		}
+		write( STDOUT_FILENO, readbuffer, count );
     }
 	pthread_join( input_thread, NULL);
 	close(sock);

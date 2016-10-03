@@ -14,6 +14,7 @@
 #include <sys/un.h>
 
 #include <pthread.h>
+#include <sys/select.h>
 
 #define LISTEN_THREAD_COUNT 4
 
@@ -25,15 +26,44 @@ typedef struct _sender_thread{
 	int willclose;
 } SenderThread;
 
+
+char* do_command( SenderThread* self, char* magic_start ){
+	if( strncmp( magic_start, "bye", 3 ) == 0 ){
+		pthread_mutex_lock( &(self->lock) );
+		self->willclose = 1;
+		pthread_mutex_unlock( &(self->lock) );
+		return magic_start+3;
+	}else if( strncmp( magic_start, "test", 4 ) == 0 ){
+		fprintf(stderr,"test command\n");
+		return magic_start+4;
+	}else{
+		fprintf(stderr,"unknown command\n");
+	}
+	return magic_start;
+}
+
 void *thread_main( void *arg ){
 	SenderThread *self;
 	self = (SenderThread* ) arg;
+	char* magic = "::mc::"; 
+	// data read from recv
 	char readbuffer[1024];
+	// data to be send to pipe
+	char sendbuffer[1024];
+	// position of first magic char from current command spec
+	char* command_curr_pos = NULL;
+	// position of first non magic char from current command spec
+	char* command_curr_pos2 = NULL;
+	// position of first non magic char from last command spec
+	char* command_last_pos = NULL;
+	// current write position in send buffer
+	char* send_cur_pos = NULL;
+	// byte send counts
 	ssize_t count = 0;
 	ssize_t count2 = 0;
-	ssize_t prefix_len = 3*sizeof(char);
 	
 	while( 1 ){
+		// check if thread termination is pending
 		pthread_mutex_lock( &(self->lock) );
 		if( self->willclose == 1 ){
 			pthread_mutex_unlock( &(self->lock) );
@@ -41,27 +71,37 @@ void *thread_main( void *arg ){
 		}
 		pthread_mutex_unlock( &(self->lock) );
 		
+		// block reading
 		count = recv( self->socket, readbuffer, sizeof(readbuffer), 0 );
 		if( count == 0 ){
-			//break;
+			continue;
 		}else if( count < 0 ){
 			perror("failed to read from socket");
 		}else{
-			if( count > prefix_len ){
-				// message to stdin of child process
-				if( strncmp( readbuffer, "msg", prefix_len) == 0 ){
-					count2 = write( self->pipe, &(readbuffer[3]), count );
-					if( count2 < 0 ){
-						perror("failed to write to pipe");
-					}
-				// client disconnect
-				}else if( strncmp( readbuffer, "bye", prefix_len) == 0 ){
-					pthread_mutex_lock( &(self->lock) );
-					self->willclose = 1;
-					pthread_mutex_unlock( &(self->lock) );
-				}else{
-					fprintf(stderr,"unknown command %.3s\n", readbuffer);
-				}
+			// parse for magic strings describing commands
+			command_last_pos = readbuffer;
+			send_cur_pos = sendbuffer;
+			command_curr_pos = strstr( readbuffer, magic );
+			while( command_curr_pos != NULL ){
+				// run command & get position after command spec
+				command_curr_pos2 = do_command( self, command_curr_pos+6 );
+				// copy data from before command spec
+				strncpy( send_cur_pos, command_last_pos, command_curr_pos-command_last_pos);
+				// update write position in sendbuffer
+				send_cur_pos = send_cur_pos + (command_curr_pos-command_last_pos);
+				// next data copy starts at end of command spec
+				command_last_pos = command_curr_pos2;
+				// search for next command spec
+				command_curr_pos = strstr( command_curr_pos2, magic );
+			}
+			// copy the rest
+			strcpy( send_cur_pos, command_last_pos );
+			// todo: handle partial magic string
+
+			// finally write to child process stdin
+			count2 = write( self->pipe, sendbuffer, count );
+			if( count2 < 0 ){
+				perror("failed to write to pipe");
 			}
 		}
 	}
@@ -73,6 +113,7 @@ void *thread_main( void *arg ){
 	pthread_mutex_unlock( &(self->lock) );
 	pthread_exit(NULL);
 }
+
 void *send_thread_main( void *arg ){
 	SenderThread *threads;
 	threads = (SenderThread*) arg;
@@ -81,12 +122,10 @@ void *send_thread_main( void *arg ){
 	ssize_t count = 0;
 	int i = 0;
 	int ok= 0;
-	ssize_t prefix_len = 3*sizeof(char);
 
 	while( 1 ){
-		count = read(self->pipe, &(readbuffer[3]), sizeof(readbuffer)-prefix_len );
+		count = read(self->pipe, readbuffer, sizeof(readbuffer) );
 		if( count > 0 ){
-			memcpy( readbuffer, "msg", prefix_len );
 			for( i=1; i<LISTEN_THREAD_COUNT+1; i++ ){
 				ok = 0;
 				pthread_mutex_lock( &(threads[i].lock) );
@@ -95,7 +134,7 @@ void *send_thread_main( void *arg ){
 				}
 				pthread_mutex_unlock( &(threads[i].lock) );
 				if( ok == 1 ){
-					if( send( (&threads[i])->socket, readbuffer, count+prefix_len, MSG_NOSIGNAL ) < 0 ){
+					if( send( (&threads[i])->socket, readbuffer, count, MSG_NOSIGNAL ) < 0 ){
 						perror("faild to send data");
 						// shutdown client thread
 						pthread_mutex_lock( &(threads[i].lock) );
