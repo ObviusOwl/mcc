@@ -3,7 +3,7 @@ LD=     ld
 CFLAGS= -W -Wall -Werror -std=c99
 CFLAGS_DEBUG= -W -Wall -Werror -std=c99 -Wno-unused-but-set-variable -Wno-unused-variable -Wno-unused-parameter
 LIBS= -pthread -lm
-OBJECTS= args.o mc.o
+OBJECTS= clients.o args.o mc.o
 OBJECTS2= client.o
 
 debug: OPT_FLAGS= -Og -g 
