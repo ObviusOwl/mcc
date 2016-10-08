@@ -2,6 +2,7 @@
 #define CONFIG_H
 
 #define _XOPEN_SOURCE  700
+#define _GNU_SOURCE
 #define LISTEN_THREAD_COUNT 4
 
 

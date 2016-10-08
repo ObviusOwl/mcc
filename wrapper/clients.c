@@ -5,9 +5,12 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <errno.h>
 
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <signal.h>
+#include <poll.h>
 
 char* do_command( SenderThread* self, char* magic_start ){
 	if( strncmp( magic_start, "bye", 3 ) == 0 ){
@@ -22,6 +25,16 @@ char* do_command( SenderThread* self, char* magic_start ){
 		fprintf(stderr,"unknown command\n");
 	}
 	return magic_start;
+}
+
+int want_close( SenderThread* self ){
+	int want = 0;
+	pthread_mutex_lock( &(self->lock) );
+	if( self->willclose == 1 ){
+		want = 1;
+	}
+	pthread_mutex_unlock( &(self->lock) );
+	return want;
 }
 
 void *thread_main( void *arg ){
@@ -43,23 +56,55 @@ void *thread_main( void *arg ){
 	// byte send counts
 	ssize_t count = 0;
 	ssize_t count2 = 0;
+	// structs for poll
+	struct pollfd pfds[] = {
+		{self->socket, POLLIN, 0 },
+		{self->wakeup_pipe[0], POLLIN, 0 }
+	};
+	int pcount=0;
+	unsigned int readbuffer_cur_idx = 0;
 	
 	while( 1 ){
 		// check if thread termination is pending
-		pthread_mutex_lock( &(self->lock) );
-		if( self->willclose == 1 ){
-			pthread_mutex_unlock( &(self->lock) );
+		if( want_close(self) ){
 			break;
 		}
-		pthread_mutex_unlock( &(self->lock) );
-		
 		// block reading
-		count = recv( self->socket, readbuffer, sizeof(readbuffer), 0 );
-		if( count == 0 ){
+		pcount = poll( pfds, 2, -1 );
+		// recheck if close is pending since poll may block for a long time
+		if( want_close(self) ){
+			break;
+		}
+		if( pcount < 0 ){
+			perror("poll error");
 			continue;
-		}else if( count < 0 ){
-			perror("failed to read from socket");
-		}else{
+		}
+		if( pfds[1].revents & POLLIN ){
+			// wakeup
+		}else if( (pfds[0].revents & POLLIN) || (pfds[0].revents & POLLHUP) ){
+			// get all the data
+			readbuffer_cur_idx = 0;
+			while( readbuffer_cur_idx < sizeof(readbuffer) ){
+				count = recv( self->socket, &(readbuffer[readbuffer_cur_idx]), sizeof(readbuffer)-readbuffer_cur_idx, MSG_DONTWAIT );
+				if( count < 0 ){
+					if( (errno == EAGAIN) || (errno == EWOULDBLOCK) ){
+						break;
+					}else{
+						perror( "faild to read from socket" );
+						break;
+					}
+				}else{
+					readbuffer_cur_idx = readbuffer_cur_idx + count;
+				}
+			}
+			if( readbuffer_cur_idx == 0 ){
+				if( pfds[0].revents & POLLHUP ){
+					break;
+				}else{
+					continue;
+				}
+			}
+			count = readbuffer_cur_idx;
 			// parse for magic strings describing commands
 			command_last_pos = readbuffer;
 			send_cur_pos = sendbuffer;
@@ -85,8 +130,11 @@ void *thread_main( void *arg ){
 			if( count2 < 0 ){
 				perror("failed to write to pipe");
 			}
+		}else if( pfds[0].revents & POLLERR ){
+			perror("connection lost");
+			break;
 		}
-	}
+	} // end main loop
 	pthread_mutex_lock( &(self->lock) );
 	free( self->thread );
 	self->thread = NULL;
@@ -104,6 +152,7 @@ void *send_thread_main( void *arg ){
 	ssize_t count = 0;
 	int i = 0;
 	int ok= 0;
+	ssize_t r;
 
 	while( 1 ){
 		count = read(self->pipe, readbuffer, sizeof(readbuffer) );
@@ -122,6 +171,11 @@ void *send_thread_main( void *arg ){
 						pthread_mutex_lock( &(threads[i].lock) );
 						threads[i].willclose = 1;
 						pthread_mutex_unlock( &(threads[i].lock) );
+						r = write( threads[i].wakeup_pipe[1], &ok, sizeof(int) );
+						if( r < 0 ){
+							perror( "failed to write to wakeup pipe" );
+							continue;
+						}
 						continue;
 					}
 				}

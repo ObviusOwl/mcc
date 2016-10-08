@@ -9,6 +9,7 @@ typedef struct _sender_thread{
 	pthread_t *thread;
 	pthread_mutex_t lock;
 	int willclose;
+	int wakeup_pipe[2];
 } SenderThread;
 
 
