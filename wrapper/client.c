@@ -31,7 +31,9 @@ void *thread_main( void *arg ){
 			}
 			memmove( line+5, line, strlen(line)+1 );
 			memcpy( line, "::mc::", 5);
-			do_quit = 1;
+			if( strncmp(line,"::mc::quit", 10) == 0 ){
+				do_quit = 1;
+			}
 		}
 		if( send( *sock, line, size, MSG_NOSIGNAL ) < 0 ){
 			perror("faild to send data");
