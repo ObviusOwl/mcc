@@ -81,13 +81,20 @@ void *thread_main( void *arg ){
 		}
 		if( pfds[1].revents & POLLIN ){
 			// wakeup
-		}else if( (pfds[0].revents & POLLIN) || (pfds[0].revents & POLLHUP) ){
+			int msg = 0;
+			ssize_t c;
+			c = read( self->wakeup_pipe[0], &msg, sizeof(int) );
+			if( c < 0){
+			}
+			continue;
+		}
+		if( (pfds[0].revents & POLLIN) || (pfds[0].revents & POLLHUP) ){
 			// get all the data
 			readbuffer_cur_idx = 0;
 			while( readbuffer_cur_idx < sizeof(readbuffer) ){
 				count = recv( self->socket, &(readbuffer[readbuffer_cur_idx]), sizeof(readbuffer)-readbuffer_cur_idx, MSG_DONTWAIT );
-				if( count < 0 ){
-					if( (errno == EAGAIN) || (errno == EWOULDBLOCK) ){
+				if( count <= 0 ){
+					if( (errno == EAGAIN) || (errno == EWOULDBLOCK) || count == 0 ){
 						break;
 					}else{
 						perror( "faild to read from socket" );
@@ -160,7 +167,7 @@ void *send_thread_main( void *arg ){
 			for( i=1; i<LISTEN_THREAD_COUNT+1; i++ ){
 				ok = 0;
 				pthread_mutex_lock( &(threads[i].lock) );
-				if( threads[i].thread != NULL ){
+				if( threads[i].thread != NULL && threads[i].willclose == 0 ){
 					ok = 1;
 				}
 				pthread_mutex_unlock( &(threads[i].lock) );
@@ -169,7 +176,7 @@ void *send_thread_main( void *arg ){
 						perror("faild to send data");
 						// shutdown client thread
 						pthread_mutex_lock( &(threads[i].lock) );
-						threads[i].willclose = 1;
+						(&threads[i])->willclose = 1;
 						pthread_mutex_unlock( &(threads[i].lock) );
 						r = write( threads[i].wakeup_pipe[1], &ok, sizeof(int) );
 						if( r < 0 ){
