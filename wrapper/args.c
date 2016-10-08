@@ -11,8 +11,8 @@ static char prog_doc[] = "Wrapper for minecraft with stdio redirect to a socket"
 static char args_doc[] = "[bs] startscript";
 
 static struct argp_option options[] = {
-	{ "basedir",	'b',	"path",	0,	"change to directory dir before running", 0},
-	{ "socket",		's',	"path",	0,	"path to socket for minecraft stdio", 0},
+	{ "basedir",	'b',	"path",	0,	"change to this directory prior execution of the script", 0},
+	{ "socket",		's',	"path",	0,	"path to socket for IO redirection", 0},
 	{ 0 }
 };
 

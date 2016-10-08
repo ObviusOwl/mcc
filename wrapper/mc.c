@@ -37,12 +37,12 @@ int main(int argc, char **argv){
 	argp_parse(&argp, argc, argv, 0, 0, &config);
 
 	int r, r2, r3;
-	int pipe1[2];
-	int pipe2[2];
+	int child_stdout_pipe[2];
+	int child_stdin_pipe[2];
 	int pipe3[2]; // main wakeup pipe
 	int yes = 1;
-	r = pipe( pipe1 );
-	r2 = pipe( pipe2 );
+	r = pipe( child_stdout_pipe );
+	r2 = pipe( child_stdin_pipe );
 	r3 = pipe( pipe3 );
 	if( r == -1 || r2 == -1 || r3 == -1 ){
 		perror("faild to create pipe");
@@ -53,8 +53,8 @@ int main(int argc, char **argv){
 	pid_t pid = fork();
 	if( pid > 0 ){
 		// parent
-		close( pipe1[1] );
-		close( pipe2[0] );
+		close( child_stdout_pipe[1] );
+		close( child_stdin_pipe[0] );
 
 		struct sigaction sigchld_action;
 		sigchld_action.sa_handler = sighandler_request_sutdown;
@@ -67,7 +67,6 @@ int main(int argc, char **argv){
 
 		SenderThread threads[LISTEN_THREAD_COUNT + 1];
 
-		char readbuffer[1024];
 		int i;
 		int listen_sock, client_sock;
 		struct sockaddr_un sock_addr;
@@ -106,9 +105,9 @@ int main(int argc, char **argv){
 			}
 		}
 		for( i=1; i< LISTEN_THREAD_COUNT+1 ; i++ ){
-			threads[i].pipe = pipe2[1];
+			threads[i].pipe = child_stdin_pipe[1];
 		}
-		threads[0].pipe = pipe1[0];
+		threads[0].pipe = child_stdout_pipe[0];
 		threads[0].thread = (pthread_t *) malloc( sizeof(pthread_t) );
 		pthread_create( threads[0].thread, NULL, send_thread_main, (void*) &threads);
 
@@ -190,11 +189,11 @@ int main(int argc, char **argv){
 	}else if( pid == 0 ){
 		// child
 		int r = 0;
-		close( pipe1[0] );
-		close( pipe2[1] );
-		dup2( pipe1[1] , STDOUT_FILENO );
-		dup2( pipe1[1] , STDERR_FILENO );
-		dup2( pipe2[0] , STDIN_FILENO );
+		close( child_stdout_pipe[0] );
+		close( child_stdin_pipe[1] );
+		dup2( child_stdout_pipe[1] , STDOUT_FILENO );
+		dup2( child_stdout_pipe[1] , STDERR_FILENO );
+		dup2( child_stdin_pipe[0] , STDIN_FILENO );
 
 		if( config.basedir != NULL ){
 			r = chdir( config.basedir );
