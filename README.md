@@ -34,7 +34,7 @@ For convenience, a leading colon (`:`) on a line is converted to the magic strin
 ### Wrapper example
 
 ```bash
-./mc -s /tmp/minecraft.socket -b /home/jojo/Desktop/minecraft ./ServerStart.sh
+./minecraft-wrapper -s /tmp/minecraft.socket -b /home/jojo/Desktop/minecraft ./ServerStart.sh
 ```
 
 Use the `--help` switch to get more information. Passing arguments to the command
@@ -43,7 +43,7 @@ executed as child process is currently not supported. Use a startup script inste
 Start the client like this:
 
 ```bash
-./client /tmp/minecraft.socket
+./minecraft-console /tmp/minecraft.socket
 ```
 
 To connect directly to the pipe, you can use `socat`, 

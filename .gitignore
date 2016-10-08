@@ -1,5 +1,8 @@
 *.o
-wrapper/mc
-wrapper/client
+wrapper/*
 frontend/bower_components
 frontend/node_modules
+
+!wrapper/*.c
+!wrapper/*.h
+!wrapper/Makefile

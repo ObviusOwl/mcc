@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <errno.h>
 
-const char *argp_program_version = "mcwrapper 1.0";
+const char *argp_program_version = "minecraft-wrapper 1.0";
 const char *argp_program_bug_address = "<jojo@terhaak.de>";
 
 static char prog_doc[] = "Wrapper for minecraft with stdio redirect to a socket";
